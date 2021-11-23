@@ -62,9 +62,11 @@ indirect enum IntExpr: Equatable, CustomStringConvertible {
 }
 
 enum BoolBinOp: String, Equatable, CustomStringConvertible {
-    case equal       = "=",
-         greaterThan = ">",
-         lessThan    = "<"
+    case equal              = "=",
+         greaterThan        = ">",
+         lessThan           = "<",
+         greaterThanOrEqual = ">=",
+         lessThanOrEqual    = "<="
     var description: String {
         self.rawValue
     }
@@ -206,6 +208,10 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
                 v = n1 > n2
             case .lessThan:
                 v = n1 < n2
+            case .greaterThanOrEqual:
+                v = n1 >= n2
+            case .lessThanOrEqual:
+                v = n1 <= n2
             }
             config.phrase = .boolExpr(.literal(v))
         default:
@@ -296,16 +302,52 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
     }),
 ]
 
+struct Step {
+    let ruleName: String
+    let before: Config
+    let after: Config
+}
+
+func evalSteps(config: Config) -> AnyIterator<Step> {
+    class Tracer {
+        var steps: [Step] = []
+    }
+    struct StepTracingRule: Rule {
+        let name: String
+        let f: (inout Config, [Rule]) -> Bool
+        let tracer: Tracer
+
+        func apply(config: inout Config, rules: [Rule]) -> Bool {
+            let oldConfig = config
+            let result = f(&config, rules)
+            if result {
+                tracer.steps.append(Step(ruleName: name, before: oldConfig, after: config))
+            }
+            return result
+        }
+    }
+
+    var config = config
+    let stepsItr = AnyIterator<[Step]> {
+        let tracer = Tracer()
+        let wrappedRules = rules.map { StepTracingRule(name: $0, f: $1, tracer: tracer) }
+
+        for rule in wrappedRules {
+            if rule.apply(config: &config, rules: wrappedRules) {
+                return tracer.steps
+            }
+        }
+        return nil
+    }
+    return AnyIterator(stepsItr.lazy.flatMap { $0 }.makeIterator())
+}
+
 func eval(config: inout Config) {
     struct FRule: Rule {
         let name: String
         let f: (inout Config, [Rule]) -> Bool
         func apply(config: inout Config, rules: [Rule]) -> Bool {
-            let result = f(&config, rules)
-            if result {
-                print("apply \(name)")
-            }
-            return result
+            f(&config, rules)
         }
     }
     let wrappedRules = rules.map { FRule(name: $0, f: $1) }

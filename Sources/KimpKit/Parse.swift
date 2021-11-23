@@ -1,6 +1,7 @@
 
 enum Token {
     case identifier(String), skip, assign, semicolon, `if`, then, `else`, `while`, `do`,
+         leftParen, rightParen,
          intLiteral(Int), boolLiteral(Bool), intBinOp(IntBinOp), boolBinOp(BoolBinOp)
 }
 
@@ -16,6 +17,8 @@ func lex(source: String) -> [Token] {
         case "else": return .else
         case "while": return .`while`
         case "do": return .`do`
+        case "(": return .leftParen
+        case ")": return .rightParen
         case let raw:
             let raw = String(raw)
             if let bool = Bool(raw) {
@@ -74,7 +77,7 @@ struct Parser {
         return current
     }
 
-    // C ::= skip | x := E | C ; C | if B then C else C | while B do C
+    // C ::= skip | x := E | C ; C | if B then C else C | while B do C | (C)
     // ->
     // C  ::= skip C2 | x := E C2 | if B then C else C C2 | while B do C C2
     // C2 ::= ε | ; C
@@ -95,6 +98,11 @@ struct Parser {
 
         let c1: Command
         switch currentToken {
+        case .leftParen:
+            try consumeToken()
+            let c = try parseCommand()
+            guard case .rightParen = try consumeToken() else { throw Error("expected )") }
+            c1 = c
         case .skip:
             try consumeToken()
             c1 = .skip
