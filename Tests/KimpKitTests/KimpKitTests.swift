@@ -69,6 +69,6 @@ final class KimpKitTests: XCTestCase {
         for step in singleStep {
             print(step)
         }
-//        XCTAssertEqual(steps.next()?.ruleName, "var")
+        XCTAssertEqual(singleStep.map(\.ruleName), ["var", "op1", "if1", "seq1"])
     }
 }

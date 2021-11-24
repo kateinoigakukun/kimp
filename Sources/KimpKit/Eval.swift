@@ -101,38 +101,39 @@ protocol Rule {
     func apply<T>(config: inout Config, rules: [Rule], returning: (Config) -> T?) -> T?
 }
 
-
-func trySimplifyIntExpr(rule: Rule, config: Config, rules: [Rule]) -> (IntExpr, State)? {
-    var config = config
-    return rule.apply(config: &config, rules: rules, returning: { newConfig in
-        if case let .intExpr(expr) = newConfig.phrase {
-            return (expr, newConfig.state)
-        } else {
-            return nil
-        }
-    })
+func expectIntExpr(config: Config) -> (IntExpr, State)? {
+    if case let .intExpr(expr) = config.phrase {
+        return (expr, config.state)
+    } else {
+        return nil
+    }
 }
 
-func trySimplifyCommand(rule: Rule, config: Config, rules: [Rule]) -> (Command, State)? {
-    var config = config
-    return rule.apply(config: &config, rules: rules, returning: { newConfig in
-        if case let .command(c) = newConfig.phrase {
-            return (c, newConfig.state)
-        } else {
-            return nil
-        }
-    })
+func expectBoolExpr(config: Config) -> (BoolExpr, State)? {
+    if case let .boolExpr(expr) = config.phrase {
+        return (expr, config.state)
+    } else {
+        return nil
+    }
 }
 
-func trySimplifyBoolExpr(rule: Rule, config: Config, rules: [Rule]) -> (BoolExpr, State)? {
-    var config = config
-    return rule.apply(config: &config, rules: rules, returning: { newConfig in
-        if case let .boolExpr(expr) = newConfig.phrase {
-            return (expr, newConfig.state)
-        } else {
-            return nil
+func expectCommand(config: Config) -> (Command, State)? {
+    if case let .command(c) = config.phrase {
+        return (c, config.state)
+    } else {
+        return nil
+    }
+}
+
+func trySimplify<T>(rules: [Rule], config: Config, returning: (Config) -> T?) -> T? {
+    for rule in rules {
+        var config = config
+        let result: T? = rule.apply(config: &config, rules: rules, returning: returning)
+        if let result = result {
+            return result
         }
-    })
+    }
+    return nil
 }
 
 let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
@@ -141,7 +142,6 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
             return false
         }
         guard let v = config.state[x] else {
-            print("\(x) not foundin \(config.state)")
             return false
         }
         config.phrase = .intExpr(.literal(v))
@@ -151,14 +151,14 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
         switch config.phrase {
         case let .boolExpr(.binop(op, lhs, rhs)):
             let subConfig = Config(phrase: .intExpr(lhs), state: config.state)
-            guard let (newLhs, newState) = rules.lazy.enumerated().compactMap({ trySimplifyIntExpr(rule: $1, config: subConfig, rules: rules) }).first else {
+            guard let (newLhs, newState) = trySimplify(rules: rules, config: subConfig, returning: expectIntExpr) else {
                 return false
             }
             config.phrase = .boolExpr(.binop(op: op, lhs: newLhs, rhs: rhs))
             config.state = newState
         case let .intExpr(.binop(op, lhs, rhs)):
             let subConfig = Config(phrase: .intExpr(lhs), state: config.state)
-            guard let (newLhs, newState) = rules.lazy.compactMap({ trySimplifyIntExpr(rule: $0, config: subConfig, rules: rules) }).first else {
+            guard let (newLhs, newState) = trySimplify(rules: rules, config: subConfig, returning: expectIntExpr) else {
                 return false
             }
             config.phrase = .intExpr(.binop(op: op, lhs: newLhs, rhs: rhs))
@@ -172,14 +172,14 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
         switch config.phrase {
         case let .boolExpr(.binop(op, .literal(n1), rhs)):
             let subConfig = Config(phrase: .intExpr(rhs), state: config.state)
-            guard let (newRhs, newState) = rules.lazy.compactMap({ trySimplifyIntExpr(rule: $0, config: subConfig, rules: rules) }).first else {
+            guard let (newRhs, newState) = trySimplify(rules: rules, config: subConfig, returning: expectIntExpr) else {
                 return false
             }
             config.phrase = .boolExpr(.binop(op: op, lhs: .literal(n1), rhs: newRhs))
             config.state = newState
         case let .intExpr(.binop(op, .literal(n1), rhs)):
             let subConfig = Config(phrase: .intExpr(rhs), state: config.state)
-            guard let (newRhs, newState) = rules.lazy.compactMap({ trySimplifyIntExpr(rule: $0, config: subConfig, rules: rules) }).first else {
+            guard let (newRhs, newState) = trySimplify(rules: rules, config: subConfig, returning: expectIntExpr) else {
                 return false
             }
             config.phrase = .intExpr(.binop(op: op, lhs: .literal(n1), rhs: newRhs))
@@ -227,7 +227,7 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
             return false
         }
         let subConfig = Config(phrase: .intExpr(expr), state: config.state)
-        guard let (newExpr, newState) = rules.lazy.compactMap({ trySimplifyIntExpr(rule: $0, config: subConfig, rules: rules) }).first else {
+        guard let (newExpr, newState) = trySimplify(rules: rules, config: subConfig, returning: expectIntExpr) else {
             return false
         }
         config.phrase = .command(.assign(x: x, expr: newExpr))
@@ -247,7 +247,7 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
             return false
         }
         let subConfig = Config(phrase: .command(c1), state: config.state)
-        guard let (newCommand, newState) = rules.lazy.compactMap({ trySimplifyCommand(rule: $0, config: subConfig, rules: rules) }).first else {
+        guard let (newCommand, newState) = trySimplify(rules: rules, config: subConfig, returning: expectCommand) else {
             return false
         }
         config.phrase = .command(.sequence(newCommand, c2))
@@ -266,7 +266,7 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
             return false
         }
         let subConfig = Config(phrase: .boolExpr(b), state: config.state)
-        guard let (newExpr, newState) = rules.lazy.compactMap({ trySimplifyBoolExpr(rule: $0, config: subConfig, rules: rules) }).first else {
+        guard let (newExpr, newState) = trySimplify(rules: rules, config: subConfig, returning: expectBoolExpr) else {
             return false
         }
         config.phrase = .command(.ifThenElse(condition: newExpr, then: c1, else: c2))
