@@ -70,5 +70,11 @@ final class KimpKitTests: XCTestCase {
             print(step)
         }
         XCTAssertEqual(singleStep.map(\.ruleName), ["var", "op1", "if1", "seq1"])
+        do {
+            var config = config
+            eval(config: &config)
+            XCTAssertEqual(config.phrase, .command(.skip))
+            XCTAssertEqual(config.state, ["x": 10, "y": 16, "z": 43046721])
+        }
     }
 }
