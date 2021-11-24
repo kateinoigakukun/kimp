@@ -91,45 +91,48 @@ struct Config {
     var state: State
 }
 
+extension Config: CustomStringConvertible {
+    var description: String {
+        "〈 \(phrase), \(state) 〉"
+    }
+}
+
 protocol Rule {
-    func apply(config: inout Config, rules: [Rule]) -> Bool
+    func apply<T>(config: inout Config, rules: [Rule], returning: (Config) -> T?) -> T?
 }
 
 
 func trySimplifyIntExpr(rule: Rule, config: Config, rules: [Rule]) -> (IntExpr, State)? {
     var config = config
-    guard rule.apply(config: &config, rules: rules) else {
-        return nil
-    }
-    if case let .intExpr(expr) = config.phrase {
-        return (expr, config.state)
-    } else {
-        return nil
-    }
+    return rule.apply(config: &config, rules: rules, returning: { newConfig in
+        if case let .intExpr(expr) = newConfig.phrase {
+            return (expr, newConfig.state)
+        } else {
+            return nil
+        }
+    })
 }
 
 func trySimplifyCommand(rule: Rule, config: Config, rules: [Rule]) -> (Command, State)? {
     var config = config
-    guard rule.apply(config: &config, rules: rules) else {
-        return nil
-    }
-    if case let .command(c) = config.phrase {
-        return (c, config.state)
-    } else {
-        return nil
-    }
+    return rule.apply(config: &config, rules: rules, returning: { newConfig in
+        if case let .command(c) = newConfig.phrase {
+            return (c, newConfig.state)
+        } else {
+            return nil
+        }
+    })
 }
 
 func trySimplifyBoolExpr(rule: Rule, config: Config, rules: [Rule]) -> (BoolExpr, State)? {
     var config = config
-    guard rule.apply(config: &config, rules: rules) else {
-        return nil
-    }
-    if case let .boolExpr(expr) = config.phrase {
-        return (expr, config.state)
-    } else {
-        return nil
-    }
+    return rule.apply(config: &config, rules: rules, returning: { newConfig in
+        if case let .boolExpr(expr) = newConfig.phrase {
+            return (expr, newConfig.state)
+        } else {
+            return nil
+        }
+    })
 }
 
 let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
@@ -148,7 +151,7 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
         switch config.phrase {
         case let .boolExpr(.binop(op, lhs, rhs)):
             let subConfig = Config(phrase: .intExpr(lhs), state: config.state)
-            guard let (newLhs, newState) = rules.lazy.compactMap({ trySimplifyIntExpr(rule: $0, config: subConfig, rules: rules) }).first else {
+            guard let (newLhs, newState) = rules.lazy.enumerated().compactMap({ trySimplifyIntExpr(rule: $1, config: subConfig, rules: rules) }).first else {
                 return false
             }
             config.phrase = .boolExpr(.binop(op: op, lhs: newLhs, rhs: rhs))
@@ -302,13 +305,17 @@ let rules: [(String, (inout Config, [Rule]) -> Bool)] = [
     }),
 ]
 
-struct Step {
+struct Step: CustomStringConvertible {
     let ruleName: String
     let before: Config
     let after: Config
+
+    var description: String {
+        "(\(ruleName)) \(before) → \(after)"
+    }
 }
 
-func evalSteps(config: Config) -> AnyIterator<Step> {
+func evalSteps(config: Config) -> AnyIterator<[Step]> {
     class Tracer {
         var steps: [Step] = []
     }
@@ -317,44 +324,54 @@ func evalSteps(config: Config) -> AnyIterator<Step> {
         let f: (inout Config, [Rule]) -> Bool
         let tracer: Tracer
 
-        func apply(config: inout Config, rules: [Rule]) -> Bool {
+        func apply<T>(config: inout Config, rules: [Rule], returning: (Config) -> T?) -> T? {
             let oldConfig = config
-            let result = f(&config, rules)
-            if result {
-                tracer.steps.append(Step(ruleName: name, before: oldConfig, after: config))
+            let applied = f(&config, rules)
+            guard applied else {
+                return nil
             }
+            guard let result = returning(config) else {
+                return nil
+            }
+            tracer.steps.append(Step(ruleName: name, before: oldConfig, after: config))
             return result
         }
     }
 
     var config = config
-    let stepsItr = AnyIterator<[Step]> {
+    return AnyIterator<[Step]> {
         let tracer = Tracer()
         let wrappedRules = rules.map { StepTracingRule(name: $0, f: $1, tracer: tracer) }
 
         for rule in wrappedRules {
-            if rule.apply(config: &config, rules: wrappedRules) {
+            if rule.apply(config: &config, rules: wrappedRules, returning: { _ in () }) != nil {
                 return tracer.steps
             }
         }
         return nil
     }
-    return AnyIterator(stepsItr.lazy.flatMap { $0 }.makeIterator())
 }
 
 func eval(config: inout Config) {
     struct FRule: Rule {
         let name: String
         let f: (inout Config, [Rule]) -> Bool
-        func apply(config: inout Config, rules: [Rule]) -> Bool {
-            f(&config, rules)
+        func apply<T>(config: inout Config, rules: [Rule], returning: (Config) -> T?) -> T? {
+            let applied = f(&config, rules)
+            guard applied else {
+                return nil
+            }
+            guard let result = returning(config) else {
+                return nil
+            }
+            return result
         }
     }
     let wrappedRules = rules.map { FRule(name: $0, f: $1) }
 evalLoop:
     while true {
         for rule in wrappedRules {
-            if rule.apply(config: &config, rules: wrappedRules) {
+            if rule.apply(config: &config, rules: wrappedRules, returning: { _ in () }) != nil {
                 continue evalLoop
             }
         }
