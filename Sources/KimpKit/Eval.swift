@@ -37,12 +37,12 @@ indirect enum Command: Equatable, CustomStringConvertible {
     }
 }
 
-enum IntBinOp: String, Equatable, CustomStringConvertible {
+enum IntBinOp: Character, Equatable, CustomStringConvertible {
     case plus  = "+",
          minus = "-",
          times = "×"
     var description: String {
-        self.rawValue
+        String(self.rawValue)
     }
 }
 

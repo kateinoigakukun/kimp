@@ -5,37 +5,116 @@ enum Token {
          intLiteral(Int), boolLiteral(Bool), intBinOp(IntBinOp), boolBinOp(BoolBinOp)
 }
 
+enum LexError: Error {
+    case unexpected(Character, expected: Character, index: String.Index)
+}
 
-func lex(source: String) -> [Token] {
-    source.split(separator: " ").map { rawToken in
-        switch rawToken {
-        case "skip": return .skip
-        case ":=": return .assign
-        case ";": return .semicolon
-        case "if": return .`if`
-        case "then": return .then
-        case "else": return .else
-        case "while": return .`while`
-        case "do": return .`do`
-        case "(": return .leftParen
-        case ")": return .rightParen
-        case let raw:
-            let raw = String(raw)
-            if let bool = Bool(raw) {
-                return .boolLiteral(bool)
-            }
-            if let int = Int(raw) {
-                return .intLiteral(int)
-            }
-            if let op = IntBinOp(rawValue: raw) {
-                return .intBinOp(op)
-            }
-            if let op = BoolBinOp(rawValue: raw) {
-                return .boolBinOp(op)
-            }
-            return .identifier(raw)
-        }
+func lex(source: String) throws -> [Token] {
+    var cursor = source.startIndex
+    var current: Character { source[cursor] }
+    var isEOS: Bool { cursor >= source.endIndex }
+    func peekNext() -> Character {
+        return source[source.index(after: cursor)]
     }
+    func advance(offsetBy offset: String.IndexDistance = 1) {
+        cursor = source.index(cursor, offsetBy: offset)
+    }
+
+    /// Match [a-zA-Z]+
+    func lexIdentifier() -> Token {
+        let start = cursor
+        func isValid(_ c: Character) -> Bool {
+            return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "'"
+        }
+        while (!isEOS && isValid(current)) {
+            advance()
+        }
+        let end = cursor
+        let ident = String(source[start..<end])
+
+        if let bool = Bool(ident) {
+            return .boolLiteral(bool)
+        } else if ident == "skip" {
+            return .skip
+        } else if ident == "if" {
+            return .`if`
+        } else if ident == "then" {
+            return .then
+        } else if ident == "else" {
+            return .else
+        } else if ident == "while" {
+            return .`while`
+        } else if ident == "do" {
+            return .do
+        }
+        return .identifier(ident)
+    }
+
+    func lexNumber() -> Int {
+        let start = cursor
+        func isValid(_ c: Character) -> Bool {
+            return c >= "0" && c <= "9"
+        }
+        while (!isEOS && isValid(current)) {
+            advance()
+        }
+        let end = cursor
+        return Int(source[start..<end])!
+    }
+
+    var tokens: [Token] = []
+    while !isEOS {
+        switch current {
+        case ":":
+            guard peekNext() == "=" else {
+                throw LexError.unexpected(peekNext(), expected: "=", index: cursor)
+            }
+            tokens.append(.assign)
+            advance(offsetBy: 2)
+        case ";":
+            tokens.append(.semicolon)
+            advance()
+        case "(":
+            tokens.append(.leftParen)
+            advance()
+        case ")":
+            tokens.append(.rightParen)
+            advance()
+        case "=":
+            tokens.append(.boolBinOp(.equal))
+            advance()
+        case ">":
+            if peekNext() == "=" {
+                tokens.append(.boolBinOp(.greaterThanOrEqual))
+                advance(offsetBy: 2)
+            } else {
+                tokens.append(.boolBinOp(.greaterThan))
+                advance()
+            }
+        case "<":
+            if peekNext() == "=" {
+                tokens.append(.boolBinOp(.lessThanOrEqual))
+                advance(offsetBy: 2)
+            } else {
+                tokens.append(.boolBinOp(.lessThan))
+                advance()
+            }
+        case " ", "\t", "\n":
+            advance()
+            break
+        case "0"..."9":
+            tokens.append(.intLiteral(lexNumber()))
+        default:
+            if let op = IntBinOp(rawValue: current) {
+                tokens.append(.intBinOp(op))
+                advance()
+            } else {
+                tokens.append(lexIdentifier())
+            }
+        }
+        guard !isEOS else { break }
+    }
+    return tokens
 }
 
 /// Recursive-descent parser
@@ -135,9 +214,9 @@ struct Parser {
     }
     
 
-    // E ::= n | x | E iop E
+    // E ::= n | -n | x | E iop E | (E)
     // ->
-    // E  ::= n E2 | x E2
+    // E  ::= n E2 | -n E2 | x E2 | (E) E2
     // E2 ::= ε | iop E
     mutating func parseIntExpr() throws -> IntExpr {
         func parseIntExpr2() throws -> (_ lhs: IntExpr) -> (IntExpr) {
@@ -162,6 +241,14 @@ struct Parser {
         case .intLiteral(let v):
             try consumeToken()
             lhs = .literal(v)
+        case .leftParen:
+            try consumeToken()
+            lhs = try parseIntExpr()
+            guard case .rightParen = try consumeToken() else { throw Error("expected )") }
+        case .intBinOp(.minus):
+            try consumeToken()
+            guard case let .intLiteral(v) = try consumeToken() else { throw Error("expected int literal") }
+            lhs = .literal(-v)
         default:
             throw Error("unexpected '\(currentToken)' expecting expression")
         }
