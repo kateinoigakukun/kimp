@@ -85,10 +85,20 @@ final class KimpKitTests: XCTestCase {
         let state = [
             "X": 1, "Y": 0, "Z": 0
         ]
-        var config = Config(phrase: .command(command), state: state)
-        eval(config: &config)
-        XCTAssertEqual(config.state["X"], 1)
-        XCTAssertEqual(config.state["Y"], 1)
-        XCTAssertEqual(config.state["Z"], 0)
+        let config = Config(phrase: .command(command), state: state)
+        var resultConfig = config
+        eval(config: &resultConfig)
+        XCTAssertEqual(resultConfig.state["X"], 1)
+        XCTAssertEqual(resultConfig.state["Y"], 1)
+        XCTAssertEqual(resultConfig.state["Z"], 0)
+
+        let deriv = buildDeriviation(config: config)
+        let pp = PrettyPrinter()
+        pp.printTree(deriviation: deriv)
+        print(pp.buffer)
+
+        for (state, subst) in pp.stateSubsts.sorted(by: { $0.value < $1.value}) {
+            print(pp.printStateSubst(state: state, subst: subst))
+        }
     }
 }
